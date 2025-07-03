@@ -10,6 +10,8 @@ let courtStatus = {
     
 };
 
+let friendsList = {}; // Objeto para armazenar a lista de amigos do usuário logado
+
 
 
 // Firebase Configuration
@@ -106,6 +108,22 @@ async function addOccupant(court, user) {
     showNotification(`${user.username} ${user.lastName || ""} entrou na Quadra ${court.toUpperCase()}!`);
 
     startWatchingPosition(court, user);
+}
+
+function showFriendsListModal() {
+    if (!currentUser) {
+        showNotification("Por favor, faça login para ver sua lista de amigos!");
+        showLoginModal();
+        return;
+    }
+    loadFriendsList(); // Carrega a lista de amigos do Firebase
+    document.getElementById("friends-list-modal").style.display = "flex";
+}
+
+function hideFriendsListModal() {
+    document.getElementById("friends-list-modal").style.display = "none";
+    document.getElementById("friend-search-input").value = ''; // Limpa o input de busca
+    document.getElementById("friend-search-results").innerHTML = ''; // Limpa os resultados da busca
 }
 
 // Remover ocupante da quadra
@@ -274,6 +292,7 @@ document.addEventListener("DOMContentLoaded", async function() {
     await loadCourtStatus(); // Carregar status das quadras do Firebase
     initializeAuth(); // Inicializa o listener de autenticação
     await initializeRanking();
+    await checkAndResetWeeklyTime(); // NOVO: Verifica e executa reset semanal se necessário
 
     const chatWidget = document.getElementById("chat-widget");
     if (chatWidget) {
@@ -479,6 +498,8 @@ async function handleRegister(event) {
             phone: phone,
             gender: gender,
             totalTime: 0,
+            weeklyTime: 0, // NOVO: Tempo semanal
+            lastWeeklyReset: new Date().toISOString(), // NOVO: Data do último reset semanal
             joinDate: new Date().toISOString(),
             configId: userConfigId,
             playsAt: playsAt,
@@ -529,6 +550,7 @@ function updateUserDisplay() {
     const registerBtn = document.getElementById("register-btn");
     const logoutBtn = document.getElementById("logout-btn");
     const adminPanelBtn = document.getElementById("admin-panel-btn"); // NOVO
+    const friendsListBtn = document.getElementById("friends-list-btn"); // NOVO
 
     if (currentUser) {
         userDisplay.textContent = `${currentUser.username} ${currentUser.lastName || ""}`; // Exibe nome completo
@@ -538,6 +560,7 @@ function updateUserDisplay() {
         registerBtn.style.display = "none";
         logoutBtn.style.display = "inline-block";
         updateAdminButtonVisibility(); // NOVO: Atualiza a visibilidade do botão de admin
+        friendsListBtn.style.display = "inline-block"; // Mostra o botão Amigos
     } else {
         userDisplay.textContent = "Visitante";
         userPoints.textContent = "0s"; // Tempo inicial para visitante
@@ -546,6 +569,7 @@ function updateUserDisplay() {
         registerBtn.style.display = "inline-block";
         logoutBtn.style.display = "none";
         adminPanelBtn.style.display = "none"; // Esconde o botão de admin se não estiver logado
+        friendsListBtn.style.display = "none"; // Esconde o botão Amigos
     }
 }
 
@@ -571,11 +595,17 @@ async function showUserSettingsModal() { // Tornada async para buscar histórico
     document.getElementById("settings-full-name").textContent = `${currentUser.username} ${currentUser.lastName || ""}`;
     document.getElementById("settings-email").textContent = currentUser.email || "N/A";
     document.getElementById("settings-phone").textContent = currentUser.phone || "N/A";
+    document.getElementById("settings-gender").textContent = currentUser.gender || "Não informado"; // LINHA ADICIONADA
     document.getElementById("settings-total-time").textContent = formatTime(currentUser.totalTime || 0);
-    
+
     // Formatar a data de entrada
     const joinDate = currentUser.joinDate ? new Date(currentUser.joinDate).toLocaleDateString("pt-BR") : "N/A";
     document.getElementById("settings-join-date").textContent = joinDate;
+
+    // NOVO: Preencher o ID de Configuração
+    document.getElementById("settings-config-id").textContent = currentUser.configId || "N/A";
+    document.getElementById("settings-plays-at").textContent = currentUser.playsAt || "Não informado";
+
 
     // Preencher o histórico de tempo
     const historyList = document.getElementById("history-list");
@@ -584,8 +614,6 @@ async function showUserSettingsModal() { // Tornada async para buscar histórico
     const userSessionsRef = database.ref(`userSessions/${currentUser.uid}`);
     const snapshot = await userSessionsRef.once("value");
     const sessionsData = snapshot.val();
-
-    document.getElementById("settings-plays-at").textContent = currentUser.playsAt || "Não informado";
 
     if (sessionsData) {
         const sessionsArray = Object.values(sessionsData);
@@ -653,6 +681,8 @@ async function saveUsers(users) {
                 email: user.email,
                 phone: user.phone,
                 totalTime: user.totalTime || 0, // Garante que totalTime seja salvo
+                weeklyTime: user.weeklyTime || 0, // NOVO: Garante que weeklyTime seja salvo
+                lastWeeklyReset: user.lastWeeklyReset || new Date().toISOString(), // NOVO: Garante que lastWeeklyReset seja salvo
                 joinDate: user.joinDate
             };
         }
@@ -667,6 +697,7 @@ async function addTimeToUser(uid, timeToAdd) {
     userRef.transaction((currentData) => {
         if (currentData) {
             currentData.totalTime = (currentData.totalTime || 0) + timeToAdd;
+            currentData.weeklyTime = (currentData.weeklyTime || 0) + timeToAdd; // NOVO: Adiciona ao tempo semanal
         }
         return currentData;
     }, (error, committed, snapshot) => {
@@ -676,6 +707,7 @@ async function addTimeToUser(uid, timeToAdd) {
             // Atualiza o currentUser localmente se for o mesmo usuário
             if (currentUser && currentUser.uid === uid) {
                 currentUser.totalTime = snapshot.val().totalTime;
+                currentUser.weeklyTime = snapshot.val().weeklyTime; // NOVO: Atualiza tempo semanal local
                 updateUserDisplay();
             }
             updateRankingDisplay(); // Atualiza o ranking após a mudança de tempo
@@ -683,10 +715,102 @@ async function addTimeToUser(uid, timeToAdd) {
     });
 }
 
+// NOVO: Função para verificar se é domingo e resetar o tempo semanal
+async function checkAndResetWeeklyTime() {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Domingo, 1 = Segunda, etc.
+    
+    // Se não for domingo, não faz nada
+    if (dayOfWeek !== 0) {
+        return;
+    }
+    
+    // Verifica se já foi feito o reset esta semana
+    const lastResetRef = database.ref("systemSettings/lastWeeklyReset");
+    const lastResetSnapshot = await lastResetRef.once("value");
+    const lastReset = lastResetSnapshot.val();
+    
+    if (lastReset) {
+        const lastResetDate = new Date(lastReset);
+        const daysSinceLastReset = Math.floor((now - lastResetDate) / (1000 * 60 * 60 * 24));
+        
+        // Se o último reset foi há menos de 7 dias, não faz o reset
+        if (daysSinceLastReset < 7) {
+            return;
+        }
+    }
+    
+    // Executa o reset semanal
+    await resetWeeklyTime();
+    
+    // Atualiza a data do último reset
+    await lastResetRef.set(now.toISOString());
+    
+    showNotification("🔄 Ranking semanal foi resetado! Nova semana começou!");
+}
+
+// NOVO: Função para resetar o tempo semanal de todos os usuários
+async function resetWeeklyTime() {
+    try {
+        const usersRef = database.ref("users");
+        const snapshot = await usersRef.once("value");
+        const usersData = snapshot.val();
+        
+        if (!usersData) {
+            return;
+        }
+        
+        const updates = {};
+        const resetDate = new Date().toISOString();
+        
+        // Prepara as atualizações para todos os usuários
+        for (const uid in usersData) {
+            updates[`users/${uid}/weeklyTime`] = 0;
+            updates[`users/${uid}/lastWeeklyReset`] = resetDate;
+        }
+        
+        // Executa todas as atualizações de uma vez
+        await database.ref().update(updates);
+        
+        // Atualiza o currentUser local se estiver logado
+        if (currentUser) {
+            currentUser.weeklyTime = 0;
+            currentUser.lastWeeklyReset = resetDate;
+            updateUserDisplay();
+        }
+        
+        // Atualiza a exibição do ranking
+        updateRankingDisplay();
+        
+        console.log("Reset semanal executado com sucesso!");
+        
+    } catch (error) {
+        console.error("Erro ao executar reset semanal:", error);
+    }
+}
+
 // Mostrar modal de ranking
 function showRankingModal() {
     updateRankingDisplay();
+    updateWeeklyRankingDisplay(); // NOVO: Atualiza também o ranking semanal
     document.getElementById("ranking-modal").style.display = "flex"; // Usar flex para centralizar
+}
+
+// NOVO: Função para alternar entre as abas do ranking
+function showRankingTab(tabType) {
+    // Remove a classe active de todas as abas e conteúdos
+    document.querySelectorAll('.ranking-tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.ranking-content').forEach(content => content.classList.remove('active'));
+    
+    // Adiciona a classe active na aba e conteúdo selecionados
+    if (tabType === 'total') {
+        document.querySelector('.ranking-tab[onclick="showRankingTab(\'total\')"]').classList.add('active');
+        document.getElementById('ranking-total-content').classList.add('active');
+    } else if (tabType === 'weekly') {
+        document.querySelector('.ranking-tab[onclick="showRankingTab(\'weekly\')"]').classList.add('active');
+        document.getElementById('ranking-weekly-content').classList.add('active');
+        updateWeeklyRankingDisplay(); // Atualiza o ranking semanal quando a aba é selecionada
+    }
 }
 
 // Esconder modal de ranking
@@ -732,6 +856,49 @@ async function updateRankingDisplay() {
                     <div class="ranking-email">${user.email}</div>
                 </div>
                 <div class="ranking-points">${formatTime(user.totalTime || 0)}</div> <!-- Exibe o tempo formatado -->
+            </div>
+        `;
+    }).join("");
+}
+
+// NOVO: Atualizar exibição do ranking semanal
+async function updateWeeklyRankingDisplay() {
+    const users = await getUsers();
+    // Ordena por weeklyTime (tempo semanal) em ordem decrescente
+    const sortedUsers = users.sort((a, b) => (b.weeklyTime || 0) - (a.weeklyTime || 0));
+    const rankingWeeklyList = document.getElementById("ranking-weekly-list");
+    
+    if (sortedUsers.length === 0) {
+        rankingWeeklyList.innerHTML = `<p style="text-align: center; color: #666;">Nenhum utilizador registado ainda.</p>`;
+        return;
+    }
+    
+    rankingWeeklyList.innerHTML = sortedUsers.map((user, index) => {
+        const position = index + 1;
+        let positionClass = "";
+        let medal = "";
+        
+        if (position === 1) {
+            positionClass = "first";
+            medal = "🥇";
+        } else if (position === 2) {
+            positionClass = "second";
+            medal = "🥈";
+        } else if (position === 3) {
+            positionClass = "third";
+            medal = "🥉";
+        }
+        
+        return `
+            <div class="ranking-item">
+                <div class="ranking-position ${positionClass}">
+                    ${medal} ${position}º
+                </div>
+                <div class="ranking-user">
+                    <div class="ranking-username">${user.username} ${user.lastName || ""}</div> <!-- Exibe nome completo -->
+                    <div class="ranking-email">${user.email}</div>
+                </div>
+                <div class="ranking-points">${formatTime(user.weeklyTime || 0)}</div> <!-- Exibe o tempo semanal formatado -->
             </div>
         `;
     }).join("");
@@ -1034,7 +1201,7 @@ function displayCourtAnnouncement(court, announcementData) {
 }
 
 // Função para exibir o modal de detalhes do jogador (VERSÃO CORRETA E COMPLETA)
-async function showPlayerDetailsModal(playerUid) {
+async function showPlayerDetailsModal(playerUid, playerProfile = null) {
     const currentUser = getCurrentUser();
     if (!currentUser) {
         showNotification("Por favor, faça login para ver detalhes de outros jogadores!");
@@ -1049,34 +1216,38 @@ async function showPlayerDetailsModal(playerUid) {
         return;
     }
 
+    let profileToDisplay = playerProfile; // Começa com o perfil passado
+
+    // Se o perfil não foi passado ou é nulo, tenta buscar no Firebase
+    if (!profileToDisplay) {
+        try {
+            profileToDisplay = await getUserProfile(playerUid); // Reutiliza a função getUserProfile
+            if (!profileToDisplay) {
+                showNotification("Detalhes do jogador não encontrados no banco de dados.");
+                return;
+            }
+        } catch (error) {
+            console.error("Erro ao buscar detalhes do jogador no Firebase:", error);
+            showNotification("Erro ao carregar detalhes do jogador. Tente novamente.");
+            return;
+        }
+    }
+
+    // Agora, com profileToDisplay garantido (ou a função já retornou), preenche o modal
     try {
-        const playerProfile = await getUserProfile(playerUid);
-
-        if (playerProfile) {
-            // =======================================================
-            // ===== ESTE É O BLOCO DE CÓDIGO QUE ESTAVA FALTANDO =====
-            // =======================================================
-            document.getElementById("player-detail-name").textContent = `${playerProfile.username} ${playerProfile.lastName || ""}`;
-            document.getElementById("player-detail-email").textContent = playerProfile.email || "N/A";
-            document.getElementById("player-detail-phone").textContent = playerProfile.phone || "N/A";
-            document.getElementById("player-detail-total-time").textContent = formatTime(playerProfile.totalTime || 0);
-            const joinDate = playerProfile.joinDate ? new Date(playerProfile.joinDate).toLocaleDateString("pt-BR") : "N/A";
-            document.getElementById("player-detail-join-date").textContent = joinDate;
-            document.getElementById("player-detail-config-id").textContent = playerProfile.configId || "N/A";
-            // =======================================================
-            // =======================================================
-
-            // Esta parte, que adiciona o botão, já estava correta
-            updateAddFriendButton(playerUid);
+        document.getElementById("player-detail-name").textContent = `${profileToDisplay.username} ${profileToDisplay.lastName || ""}`;
+        document.getElementById("player-detail-email").textContent = profileToDisplay.email || "N/A";
+        document.getElementById("player-detail-phone").textContent = profileToDisplay.phone || "N/A";
+        document.getElementById("player-detail-total-time").textContent = formatTime(profileToDisplay.totalTime || 0);
+        const joinDate = profileToDisplay.joinDate ? new Date(profileToDisplay.joinDate).toLocaleDateString("pt-BR") : "N/A";
+        document.getElementById("player-detail-join-date").textContent = joinDate;
+        document.getElementById("player-detail-config-id").textContent = profileToDisplay.configId || "N/A";
 
             // Mostra o modal
             document.getElementById("player-details-modal").style.display = "flex";
-        } else {
-            showNotification("Detalhes do jogador não encontrados.");
-        }
     } catch (error) {
-        console.error("Erro ao carregar detalhes do jogador:", error);
-        showNotification("Erro ao carregar detalhes do jogador. Tente novamente.");
+        console.error("Erro ao preencher ou exibir o modal de detalhes do jogador:", error);
+        showNotification("Erro interno ao exibir detalhes do jogador. Tente novamente.");
     }
 }
 
@@ -1088,10 +1259,7 @@ function hidePlayerDetailsModal() {
 // Adicione esta linha ao seu window.onclick para fechar o modal ao clicar fora
 window.onclick = function(event) {
     const playerSearchResultsModal = document.getElementById("player-search-results-modal");
-
-    if (event.target === playerSearchResultsModal) {
-        hidePlayerSearchResultsModal();
-    }
+    const friendsListModal = document.getElementById("friends-list-modal"); // NOVO
 }
 
 // Fechar modais ao clicar fora
@@ -1102,7 +1270,11 @@ window.onclick = function(event) {
     const userSettingsModal = document.getElementById("user-settings-modal");
     const adminPanelModal = document.getElementById("admin-panel-modal");
     const forgotPasswordModal = document.getElementById("forgot-password-modal");
-    const privateChatModal = document.getElementById("private-chat-modal"); // NOVO: Adicione este
+    const playerSearchResultsModal = document.getElementById("player-search-results-modal");
+    const friendsListModal = document.getElementById("friends-list-modal"); // Adicione esta linha
+    const playerDetailsModal = document.getElementById("player-details-modal"); // Adicione esta linha, se ainda não tiver
+    const directMessageModal = document.getElementById("direct-message-modal"); // Adicione esta linha, se ainda não tiver
+    const privateChatModal = document.getElementById("private-chat-modal"); // Adicione esta linha, se ainda não tiver
 
     if (event.target === loginModal) {
         hideLoginModal();
@@ -1122,8 +1294,20 @@ window.onclick = function(event) {
     if (event.target === forgotPasswordModal) {
         hideForgotPasswordModal();
     }
-    if (event.target === privateChatModal) { // NOVO: Lógica para fechar o modal de chat privado
-        closePrivateChatModal();
+    if (event.target === playerSearchResultsModal) {
+        hidePlayerSearchResultsModal();
+    }
+    if (event.target === friendsListModal) { // Adicione este bloco
+        hideFriendsListModal();
+    }
+    if (event.target === playerDetailsModal) { // Adicione este bloco, se ainda não tiver
+        hidePlayerDetailsModal();
+    }
+    if (event.target === directMessageModal) { // Adicione este bloco, se ainda não tiver
+        hideDirectMessageModal();
+    }
+    if (event.target === privateChatModal) { // Adicione este bloco, se ainda não tiver
+        closePrivateChatModal(); // Use closePrivateChatModal para o modal de chat privado
     }
 }
 
@@ -2215,45 +2399,22 @@ async function searchPlayerById() {
 // NOVO: Função para exibir o resultado da pesquisa de jogador (MODIFICADA)
 async function displayPlayerSearchResult(uid, profile) {
     const searchResultsContentDiv = document.getElementById('player-search-results-content');
-    searchResultsContentDiv.innerHTML = ''; // Limpa resultados anteriores
+    searchResultsContentDiv.innerHTML = '';
 
     const resultCard = document.createElement('div');
     resultCard.className = 'player-search-card';
 
-    // Cria a estrutura do card, incluindo um container para os botões
+    // A mudança crucial: Passamos o UID e o objeto 'profile' diretamente.
+    // Usamos JSON.stringify para garantir que o objeto seja passado corretamente no HTML.
     resultCard.innerHTML = `
         <h3>${profile.username} ${profile.lastName || ""}</h3>
         <p><strong>ID de Configuração:</strong> ${profile.configId}</p>
         <div class="player-search-actions" id="search-result-actions-${uid}">
-            <!-- Botões serão inseridos aqui -->
+            <button class="btn-view-details" onclick='showPlayerDetailsModal("${uid}", ${JSON.stringify(profile)})'>Ver Detalhes</button>
         </div>
     `;
     
     searchResultsContentDiv.appendChild(resultCard);
-
-    // Agora, vamos preencher os botões dinamicamente
-    const actionsContainer = document.getElementById(`search-result-actions-${uid}`);
-    const currentUser = getCurrentUser();
-
-    // 1. Adiciona o botão "Ver Detalhes"
-    actionsContainer.innerHTML += `<button class="btn-view-details" onclick="showPlayerDetailsModal('${uid}'); hidePlayerSearchResultsModal();">Ver Detalhes</button>`;
-
-    // 2. Adiciona o botão de amizade, se aplicável
-    if (currentUser && currentUser.uid !== uid) {
-        const friendshipRef = database.ref(`friendships/${currentUser.uid}/${uid}`);
-        const snapshot = await friendshipRef.once('value');
-        const friendship = snapshot.val();
-
-        let friendButtonHtml = '';
-        if (!friendship) {
-            friendButtonHtml = `<button class="btn-add-friend" onclick="sendFriendRequest('${uid}')">Enviar Pedido</button>`;
-        } else if (friendship.status === 'pending') {
-            friendButtonHtml = `<button class="btn-add-friend pending" disabled>Pedido Pendente</button>`;
-        } else if (friendship.status === 'friends') {
-            friendButtonHtml = `<button class="btn-add-friend friends" disabled>Amigos</button>`;
-        }
-        actionsContainer.innerHTML += friendButtonHtml;
-    }
 }
 
 // NOVO: Funções para o modal de resultados da busca
@@ -2263,6 +2424,12 @@ function showPlayerSearchResultsModal() {
 
 function hidePlayerSearchResultsModal() {
     document.getElementById("player-search-results-modal").style.display = "none";
+}
+
+
+// Mostrar notificação
+function showNotification(message) {
+    // ... (código da função de notificação, sem alterações) ...
 }
 
 
@@ -2281,8 +2448,6 @@ const positionWatchers = {};
 
 /**
  * Converte graus para radianos.
- * @param {number} deg - O valor em graus.
- * @returns {number} O valor em radianos.
  */
 function toRad(deg) {
     return deg * (Math.PI / 180);
@@ -2290,11 +2455,6 @@ function toRad(deg) {
 
 /**
  * Calcula a distância entre duas coordenadas geográficas usando a fórmula de Haversine.
- * @param {number} lat1 - Latitude do ponto 1.
- * @param {number} lon1 - Longitude do ponto 1.
- * @param {number} lat2 - Latitude do ponto 2.
- * @param {number} lon2 - Longitude do ponto 2.
- * @returns {number} A distância em quilômetros.
  */
 function haversineDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // Raio da Terra em km
@@ -2312,17 +2472,13 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 
 /**
  * Inicia o monitoramento da posição do jogador para uma quadra específica.
- * @param {string} court - O nome da quadra ('ceret' ou 'pelezao').
- * @param {object} user - O objeto do usuário atual.
  */
 function startWatchingPosition(court, user) {
-    // Verifica se o navegador suporta geolocalização
     if (!navigator.geolocation) {
         console.warn("Geolocalização não é suportada por este navegador.");
         return;
     }
 
-    // Para qualquer monitoramento anterior para evitar duplicatas
     if (positionWatchers[user.uid]) {
         stopWatchingPosition(user.uid);
     }
@@ -2331,250 +2487,210 @@ function startWatchingPosition(court, user) {
 
     const watcherId = navigator.geolocation.watchPosition(
         (position) => {
-            // Sucesso ao obter a posição
             const userLat = position.coords.latitude;
             const userLon = position.coords.longitude;
-
             const distance = haversineDistance(courtCoords.lat, courtCoords.lon, userLat, userLon);
-            console.log(`Distância da quadra ${court.toUpperCase()}: ${distance.toFixed(2)} km`);
-
-            // Se a distância for maior que 1 km, remove o jogador da quadra
+            
             if (distance > 1) {
                 showNotification(`Você se afastou mais de 1km da quadra ${court.toUpperCase()} e foi removido automaticamente.`);
-                removeOccupant(court, user); // Reutiliza a função existente para remover o jogador
-                stopWatchingPosition(user.uid); // Para o monitoramento
+                removeOccupant(court, user);
+                stopWatchingPosition(user.uid);
             }
         },
         (error) => {
-            // Erro ao obter a posição
-            console.error("Erro na geolocalização:", error.message);
-            showNotification("Não foi possível obter sua localização. A remoção automática pode não funcionar.");
-            // Para o monitoramento em caso de erro para não ficar tentando indefinidamente
+            console.error("Erro no monitoramento de posição:", error.message);
             stopWatchingPosition(user.uid);
         },
         {
-            // Opções para alta precisão
             enableHighAccuracy: true,
-            timeout: 10000, // Tempo máximo para obter a posição (10 segundos)
-            maximumAge: 0 // Não usar cache de posição
+            timeout: 10000,
+            maximumAge: 0
         }
     );
 
-    // Armazena o ID do watcher para poder pará-lo depois
     positionWatchers[user.uid] = watcherId;
-    console.log(`Iniciando monitoramento de posição para o usuário ${user.username} na quadra ${court}. Watcher ID: ${watcherId}`);
+    console.log(`Iniciando monitoramento de posição para o usuário ${user.username}. Watcher ID: ${watcherId}`);
 }
 
 /**
  * Para o monitoramento da posição de um jogador.
- * @param {string} uid - O UID do usuário.
  */
 function stopWatchingPosition(uid) {
     if (positionWatchers[uid]) {
         navigator.geolocation.clearWatch(positionWatchers[uid]);
-        console.log(`Parando monitoramento de posição para o usuário ${uid}. Watcher ID: ${positionWatchers[uid]}`);
+        console.log(`Parando monitoramento de posição para o usuário ${uid}.`);
         delete positionWatchers[uid];
     }
 }
 
-// =================================================================
+// =================================================================    
 // ===== FIM DO CÓDIGO DE GEOLOCALIZAÇÃO ===========================
 // =================================================================
 
 
-// Função para navegação por abas no modal de configurações
-function openUserSettingsTab(evt, tabName) {
-    let i, tabcontent, tablinks;
-    tabcontent = document.getElementsByClassName("tab-content");
-    for (i = 0; i < tabcontent.length; i++) {
-        tabcontent[i].style.display = "none";
+// Inicializar quando a página carregar
+document.addEventListener("DOMContentLoaded", async function() {
+    // ... (resto do seu código, sem alterações) ...
+});
+
+
+async function loadFriendsList() {
+    const friendsListElement = document.getElementById("friends-list");
+    friendsListElement.innerHTML = ''; // Limpa a lista atual
+
+    if (!currentUser || !currentUser.uid) {
+        friendsListElement.innerHTML = '<p class="no-friends">Faça login para ver seus amigos.</p>';
+        return;
     }
-    tablinks = document.getElementsByClassName("tab-link");
-    for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].className = tablinks[i].className.replace(" active", "");
-    }
-    document.getElementById(tabName).style.display = "block";
-    evt.currentTarget.className += " active";
 
-    // Carrega os dados da aba de amigos apenas quando ela for aberta
-    if (tabName === 'Friends') {
-        loadFriendsData();
-    }
-}
+    try {
+        const snapshot = await firebase.database().ref(`users/${currentUser.uid}/friends`).once('value');
+        const friendsData = snapshot.val();
+        friendsList = friendsData || {}; // Atualiza a variável global
 
-// Função principal para carregar dados de amigos e pedidos
-async function loadFriendsData() {
-    const currentUser = getCurrentUser();
-    if (!currentUser) return;
+        if (Object.keys(friendsList).length === 0) {
+            friendsListElement.innerHTML = '<p class="no-friends">Você ainda não tem amigos adicionados. Busque e adicione alguém!</p>';
+            return;
+        }
 
-    const friendshipsRef = database.ref(`friendships/${currentUser.uid}`);
-    friendshipsRef.on('value', async (snapshot) => {
-        const allFriendships = snapshot.val() || {};
-        
-        const friendRequests = [];
-        const friendsList = [];
-
-        for (const friendUid in allFriendships) {
-            const friendship = allFriendships[friendUid];
-            if (friendship.status === 'pending' && friendship.sentBy !== currentUser.uid) {
-                const userProfile = await getUserProfile(friendUid);
-                friendRequests.push({ uid: friendUid, ...userProfile });
-            } else if (friendship.status === 'friends') {
-                const userProfile = await getUserProfile(friendUid);
-                friendsList.push({ uid: friendUid, ...userProfile });
+        for (const friendUid in friendsList) {
+            const friendProfile = await getUserProfile(friendUid); // Reutiliza a função existente
+            if (friendProfile) {
+                displayFriend(friendUid, friendProfile);
+            } else {
+                // Se o perfil do amigo não for encontrado (usuário deletado, etc.)
+                console.warn(`Perfil do amigo ${friendUid} não encontrado.`);
+                // Opcional: remover este amigo da lista do usuário
+                // await firebase.database().ref(`users/${currentUser.uid}/friends/${friendUid}`).remove();
             }
         }
-        
-        displayFriendRequests(friendRequests);
-        displayFriendsList(friendsList);
-    });
+    } catch (error) {
+        console.error("Erro ao carregar lista de amigos:", error);
+        friendsListElement.innerHTML = '<p class="error-loading-friends">Erro ao carregar amigos.</p>';
+    }
 }
 
-// Exibe a lista de pedidos de amizade
-function displayFriendRequests(requests) {
-    const container = document.getElementById('friend-requests-list');
-    if (requests.length === 0) {
-        container.innerHTML = '<p class="no-requests">Nenhum pedido de amizade pendente.</p>';
+function displayFriend(friendUid, friendProfile) {
+    const friendsListElement = document.getElementById("friends-list");
+    const listItem = document.createElement('li');
+    listItem.className = 'friend-item';
+    listItem.setAttribute('data-friend-uid', friendUid);
+
+    listItem.innerHTML = `
+        <span class="friend-name" onclick="showPlayerDetailsModal('${friendUid}', ${JSON.stringify(friendProfile)})">${friendProfile.username} ${friendProfile.lastName || ""}</span>
+        <div class="friend-actions">
+            <button class="btn-chat" onclick="openPrivateChatModal('${friendUid}', '${friendProfile.username} ${friendProfile.lastName || ""}')">Chat</button>
+            <button class="btn-remove" onclick="removeFriend('${friendUid}')">Remover</button>
+        </div>
+    `;
+    friendsListElement.appendChild(listItem);
+}
+
+async function searchAndAddFriend() {
+    const searchInput = document.getElementById('friend-search-input');
+    const searchTerm = searchInput.value.trim();
+    const searchResultsDiv = document.getElementById('friend-search-results');
+    searchResultsDiv.innerHTML = ''; // Limpa resultados anteriores
+
+    if (!searchTerm) {
+        searchResultsDiv.innerHTML = '<p class="search-info">Digite um ID de configuração ou nome para buscar.</p>';
         return;
     }
-    container.innerHTML = requests.map(user => `
-        <div class="request-item">
-            <span class="friend-info">${user.username} ${user.lastName || ''}</span>
-            <div class="request-actions">
-                <button class="btn-accept" onclick="handleFriendRequest('${user.uid}', true)">Aceitar</button>
-                <button class="btn-decline" onclick="handleFriendRequest('${user.uid}', false)">Recusar</button>
-            </div>
-        </div>
-    `).join('');
-}
 
-// Exibe a lista de amigos
-function displayFriendsList(friends) {
-    const container = document.getElementById('friends-list-container');
-    if (friends.length === 0) {
-        container.innerHTML = '<p class="no-friends">Você ainda não adicionou nenhum amigo.</p>';
+    if (!currentUser || !currentUser.uid) {
+        showNotification("Por favor, faça login para adicionar amigos!");
+        showLoginModal();
         return;
     }
-    container.innerHTML = friends.map(user => `
-        <div class="friend-item">
-            <span class="friend-info">${user.username} ${user.lastName || ''}</span>
-            <div class="friend-actions">
-                <button class="btn-remove-friend" onclick="removeFriend('${user.uid}')">Remover</button>
-            </div>
-        </div>
-    `).join('');
-}
 
-// Envia um pedido de amizade
-async function sendFriendRequest(recipientUid) {
-    const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.uid === recipientUid) return;
-
-    const friendshipPath1 = `friendships/${currentUser.uid}/${recipientUid}`;
-    const friendshipPath2 = `friendships/${recipientUid}/${currentUser.uid}`;
-
-    const requestData = {
-        status: 'pending',
-        sentBy: currentUser.uid,
-        timestamp: new Date().toISOString()
-    };
-
-    const updates = {};
-    updates[friendshipPath1] = requestData;
-    updates[friendshipPath2] = requestData;
-
-    await database.ref().update(updates);
-    showNotification('Pedido de amizade enviado!');
-    updateAddFriendButton(recipientUid); // Atualiza o botão
-}
-
-// Aceita ou recusa um pedido de amizade
-async function handleFriendRequest(senderUid, accept) {
-    const currentUser = getCurrentUser();
-    if (!currentUser) return;
-
-    const friendshipPath1 = `friendships/${currentUser.uid}/${senderUid}`;
-    const friendshipPath2 = `friendships/${senderUid}/${currentUser.uid}`;
-
-    if (accept) {
-        const acceptData = {
-            status: 'friends',
-            since: new Date().toISOString()
-        };
-        const updates = {};
-        updates[friendshipPath1] = acceptData;
-        updates[friendshipPath2] = acceptData;
-        await database.ref().update(updates);
-        showNotification('Amigo adicionado com sucesso!');
-    } else {
-        // Remove o pedido de ambos os usuários
-        const updates = {};
-        updates[friendshipPath1] = null;
-        updates[friendshipPath2] = null;
-        await database.ref().update(updates);
-        showNotification('Pedido de amizade recusado.');
-    }
-}
-
-// Remove um amigo
-async function removeFriend(friendUid) {
-    if (!confirm('Tem certeza que deseja remover este amigo?')) return;
-    
-    const currentUser = getCurrentUser();
-    if (!currentUser) return;
-
-    const friendshipPath1 = `friendships/${currentUser.uid}/${friendUid}`;
-    const friendshipPath2 = `friendships/${friendUid}/${currentUser.uid}`;
-
-    const updates = {};
-    updates[friendshipPath1] = null;
-    updates[friendshipPath2] = null;
-    await database.ref().update(updates);
-    showNotification('Amigo removido.');
-}
-
-// Atualiza o botão "Adicionar Amigo" com base no status da amizade
-async function updateAddFriendButton(profileUid) {
-    const currentUser = getCurrentUser();
-    const actionsContainer = document.getElementById('player-profile-actions');
-    actionsContainer.innerHTML = ''; // Limpa o botão anterior
-
-    if (!currentUser || currentUser.uid === profileUid) {
-        return; // Não mostra botão para si mesmo ou se não estiver logado
+    if (searchTerm === currentUser.configId || (searchTerm.toLowerCase() === `${currentUser.username.toLowerCase()} ${currentUser.lastName.toLowerCase()}`.trim())) {
+        searchResultsDiv.innerHTML = '<p class="search-info">Você não pode adicionar a si mesmo como amigo.</p>';
+        return;
     }
 
-    const friendshipRef = database.ref(`friendships/${currentUser.uid}/${profileUid}`);
-    const snapshot = await friendshipRef.once('value');
-    const friendship = snapshot.val();
-
-    let buttonHtml = '';
-    if (!friendship) {
-        buttonHtml = `<button class="btn-add-friend" onclick="sendFriendRequest('${profileUid}')">Adicionar Amigo</button>`;
-    } else if (friendship.status === 'pending') {
-        buttonHtml = `<button class="btn-add-friend pending" disabled>Pedido Pendente</button>`;
-    } else if (friendship.status === 'friends') {
-        buttonHtml = `<button class="btn-add-friend friends" disabled>Amigos</button>`;
-    }
-    
-    actionsContainer.innerHTML = buttonHtml;
-}
-
-// Modifique a função showPlayerDetailsModal para chamar a atualização do botão
-async function showPlayerDetailsModal(playerUid) {
-    // ... (código existente da função) ...
     try {
-        const playerProfile = await getUserProfile(playerUid);
-        if (playerProfile) {
-            // ... (código existente para preencher detalhes) ...
-            
-            // ADICIONE ESTA LINHA NO FINAL DO BLOCO 'if (playerProfile)'
-            updateAddFriendButton(playerUid);
+        const usersRef = firebase.database().ref('users');
+        let foundUser = null;
+        let foundUserUid = null;
 
-            document.getElementById("player-details-modal").style.display = "flex";
+        // Tenta buscar por configId primeiro
+        const snapshotById = await usersRef.orderByChild('configId').equalTo(searchTerm).once('value');
+        if (snapshotById.exists()) {
+            foundUserUid = Object.keys(snapshotById.val())[0];
+            foundUser = snapshotById.val()[foundUserUid];
         } else {
-            showNotification("Detalhes do jogador não encontrados.");
+            // Se não encontrar por ID, tenta buscar por nome (case-insensitive)
+            const snapshotByName = await usersRef.once('value');
+            const allUsers = snapshotByName.val();
+            if (allUsers) {
+                for (const uid in allUsers) {
+                    const user = allUsers[uid];
+                    const fullName = `${user.username || ''} ${user.lastName || ''}`.trim().toLowerCase();
+                    if (fullName === searchTerm.toLowerCase()) {
+                        foundUser = user;
+                        foundUserUid = uid;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (foundUser && foundUserUid) {
+            if (friendsList[foundUserUid]) {
+                searchResultsDiv.innerHTML = `<p class="search-info">${foundUser.username} ${foundUser.lastName || ""} já é seu amigo!</p>`;
+            } else {
+                searchResultsDiv.innerHTML = `
+                    <div class="friend-search-result-card">
+                        <span>${foundUser.username} ${foundUser.lastName || ""}</span>
+                        <button onclick="addFriend('${foundUserUid}', '${foundUser.username}', '${foundUser.lastName || ""}')">Adicionar</button>
+                    </div>
+                `;
+            }
+        } else {
+            searchResultsDiv.innerHTML = '<p class="search-info">Nenhum usuário encontrado com este ID ou nome.</p>';
         }
     } catch (error) {
-        // ... (código de erro existente) ...
+        console.error("Erro ao buscar usuário para adicionar amigo:", error);
+        showNotification("Erro ao buscar usuário. Tente novamente.");
+    }
+}
+
+async function addFriend(friendUid, friendUsername, friendLastName) {
+    if (!currentUser || !currentUser.uid) {
+        showNotification("Você precisa estar logado para adicionar amigos.");
+        return;
+    }
+
+    try {
+        await firebase.database().ref(`users/${currentUser.uid}/friends/${friendUid}`).set({
+            username: friendUsername,
+            lastName: friendLastName,
+            addedAt: new Date().toISOString()
+        });
+        showNotification(`${friendUsername} ${friendLastName} foi adicionado(a) à sua lista de amigos!`);
+        document.getElementById('friend-search-input').value = '';
+        document.getElementById('friend-search-results').innerHTML = '';
+        loadFriendsList(); // Recarrega a lista para exibir o novo amigo
+    } catch (error) {
+        console.error("Erro ao adicionar amigo:", error);
+        showNotification("Erro ao adicionar amigo. Tente novamente.");
+    }
+}
+
+async function removeFriend(friendUid) {
+    if (!currentUser || !currentUser.uid) {
+        showNotification("Você precisa estar logado para remover amigos.");
+        return;
+    }
+
+    if (confirm(`Tem certeza que deseja remover este amigo?`)) {
+        try {
+            await firebase.database().ref(`users/${currentUser.uid}/friends/${friendUid}`).remove();
+            showNotification("Amigo removido com sucesso!");
+            loadFriendsList(); // Recarrega a lista
+        } catch (error) {
+            console.error("Erro ao remover amigo:", error);
+            showNotification("Erro ao remover amigo. Tente novamente.");
+        }
     }
 }
