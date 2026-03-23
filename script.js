@@ -306,10 +306,27 @@ function filterInventory() {
     const selectedCategory = categoryFilter.value;
 
     const filtered = inventory.filter(item => {
+        // Se não há termo de busca, mostra tudo
+        if (searchTerm === '') {
+            // Se "Todas as Categorias" está selecionada (valor vazio), mostra todos os produtos
+            if (selectedCategory === '') {
+                return true;
+            }
+            // Caso contrário, filtra pela categoria selecionada
+            return item.category === selectedCategory;
+        }
+        
+        // Se há termo de busca, verifica se o nome ou categoria contém o termo
         const matchesSearch = item.name.toLowerCase().includes(searchTerm) || 
                               item.category.toLowerCase().includes(searchTerm);
-        const matchesCategory = selectedCategory === '' || item.category === selectedCategory;
-        return matchesSearch && matchesCategory;
+        
+        // Se "Todas as Categorias" está selecionada, mostra todos os que combinam com a busca
+        if (selectedCategory === '') {
+            return matchesSearch;
+        }
+        
+        // Caso contrário, filtra pela categoria E pela busca
+        return matchesSearch && item.category === selectedCategory;
     });
 
     renderInventory(filtered);
