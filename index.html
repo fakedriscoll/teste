@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle de Estoque - Loja CBP</title>
+    <title>Controle de Estoque - PCKL HOUSE</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -14,7 +14,7 @@
     <div id="login-screen" class="login-screen">
         <div class="login-container">
             <div class="login-logo">
-                <span class="cbp-text-large">CBP</span>
+                <span class="cbp-text-large">PCKL HOUSE</span>
                 <span class="sub-text-large">SISTEMA DE GESTÃO</span>
             </div>
             
@@ -57,9 +57,9 @@
         <header>
             <div class="container header-content">
                 <div class="logo">
-    <img src="img/LOGO_CBP.jpg" alt="Logo CBP" class="logo-img">
+    <img src="img/LOGO_CBP.jpg" alt="Logo PCKL HOUSE" class="logo-img">
     <div>
-        <span class="cbp-text">CBP</span>
+        <span class="cbp-text">PCKL HOUSE</span>
         <span class="sub-text">PAINEL ADMINISTRADOR</span>
     </div>
 </div>
@@ -95,8 +95,8 @@
     <div id="selection-screen" class="selection-screen" style="display: none;">
         <header class="selection-header">
             <div class="logo-large">
-                <span class="cbp-text-large">CBP</span>
-                <span class="sub-text-large">CONFEDERAÇÃO BRASILEIRA DE PICKLEBALL</span>
+                <span class="cbp-text-large">PCKL HOUSE</span>
+                <span class="sub-text-large">PCKL HOUSE</span>
             </div>
         </header>
 
@@ -126,7 +126,7 @@
         </main>
 
         <footer class="selection-footer">
-            <p>&copy; 2026 Confederação Brasileira de Pickleball - Sistema de Gestão de Estoques</p>
+            <p>&copy; 2026 PCKL HOUSE - Sistema de Gestão de Estoques</p>
         </footer>
     </div>
 
@@ -135,7 +135,7 @@
         <header>
             <div class="container header-content">
                 <div class="logo">
-                    <span class="cbp-text">CBP</span>
+                    <span class="cbp-text">PCKL HOUSE</span>
                     <span class="sub-text" id="current-inventory-name">LOJA OFICIAL</span>
                 </div>
                 <nav>
@@ -259,82 +259,77 @@
             </section>
         </main>
 
-        <!-- Modal para Adicionar/Editar Produto -->
-        <div id="product-modal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2 id="modal-title">Novo Produto</h2>
-                <form id="product-form">
-                    <input type="hidden" id="product-id">
-                    <div class="form-group">
-                        <label for="name">Nome do Produto</label>
-                        <input type="text" id="name" required>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="category">Categoria</label>
-                            <select id="category" required>
-                                <option value="Raquetes">Raquetes</option>
-                                <option value="Bolas">Bolas</option>
-                                <option value="Vestuário">Vestuário</option>
-                                <option value="Acessórios">Acessórios</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="price">Preço (R$)</label>
-                            <input type="number" id="price" step="0.01" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="quantity">Quantidade em Estoque</label>
-                            <input type="number" id="quantity" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="min-quantity">Quantidade Mínima</label>
-                            <input type="number" id="min-quantity" value="5" required>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn-save">Salvar Produto</button>
-                </form>
-            </div>
-        </div>
-
-        <!-- Modal para Registrar Vendas -->
-        <div id="sales-modal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2>Registrar Venda</h2>
-                <form id="sales-form">
-                    <input type="hidden" id="sale-product-id">
-                    <div class="form-group">
-                        <label>Produto</label>
-                        <p id="sale-product-name" style="font-weight: bold; color: var(--primary-color);"></p>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="sale-quantity">Quantidade Vendida</label>
-                            <input type="number" id="sale-quantity" min="1" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="sale-date">Data da Venda</label>
-                            <input type="date" id="sale-date" required>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn-save">Registrar Venda</button>
-                </form>
-            </div>
-        </div>
-
-        <footer>
-            <p>&copy; 2026 Confederação Brasileira de Pickleball - Sistema de Gestão de Loja</p>
+        <footer class="container">
+            <p>&copy; 2026 PCKL HOUSE - Sistema de Gestão de Loja</p>
         </footer>
     </div>
 
+    <!-- MODAL DE PRODUTO -->
+    <div id="product-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modal-title">Novo Produto</h2>
+            <form id="product-form">
+                <input type="hidden" id="product-id">
+                <div class="form-group">
+                    <label for="name">Nome do Produto</label>
+                    <input type="text" id="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="category">Categoria</label>
+                    <select id="category" required>
+                        <option value="Raquetes">Raquetes</option>
+                        <option value="Bolas">Bolas</option>
+                        <option value="Vestuário">Vestuário</option>
+                        <option value="Acessórios">Acessórios</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="price">Preço (R$)</label>
+                        <input type="number" id="price" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="quantity">Quantidade em Estoque</label>
+                        <input type="number" id="quantity" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="min-quantity">Quantidade Mínima</label>
+                    <input type="number" id="min-quantity" value="5" required>
+                </div>
+                <button type="submit" class="btn-save">Salvar Produto</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE VENDA -->
+    <div id="sales-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Registrar Venda</h2>
+            <p id="sale-product-name" style="font-weight: bold; margin-bottom: 15px; color: #003399;"></p>
+            <form id="sales-form">
+                <input type="hidden" id="sale-product-id">
+                <div class="form-group">
+                    <label for="sale-quantity">Quantidade Vendida</label>
+                    <input type="number" id="sale-quantity" min="1" required>
+                </div>
+                <div class="form-group">
+                    <label for="sale-date">Data da Venda</label>
+                    <input type="date" id="sale-date" required>
+                </div>
+                <button type="submit" class="btn-save">Registrar Venda</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- FIREBASE -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-
+    
+    <!-- APP SCRIPT -->
     <script src="script.js"></script>
 </body>
 </html>
