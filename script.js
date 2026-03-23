@@ -45,7 +45,7 @@ const currentInventoryName = document.getElementById('current-inventory-name');
 document.addEventListener('DOMContentLoaded', () => {
     setupAuthListeners();
     checkAuthState();
-    setupFilters();
+    setupFilters(); // Adicionado: Configura os filtros de busca e categoria
 });
 
 // ===== AUTENTICAÇÃO =====
@@ -72,7 +72,7 @@ function setupAuthListeners() {
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = document.getElementById('login-username').value.trim();
-        const email = username + "@pcklhouse.com";
+        const email = username + "@cbp.com";
         const password = document.getElementById('login-password').value;
         
         console.log("Tentando login para:", email);
@@ -134,7 +134,7 @@ function setupAuthListeners() {
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = document.getElementById('reg-username').value.trim();
-        const email = username + "@pcklhouse.com";
+        const email = username + "@cbp.com";
         const password = document.getElementById('reg-password').value;
         
         if (password.length < 6) {
@@ -266,17 +266,21 @@ window.selectInventory = (type) => {
     selectionScreen.style.display = 'none';
     managementScreen.style.display = 'flex';
     
+    // Configura o mês atual apenas uma vez ao selecionar o estoque
     setCurrentMonth();
 
+    // Escutar mudanças em tempo real
     db.collection(`inventory_${type}`).onSnapshot(snapshot => {
         inventory = [];
         snapshot.forEach(doc => {
             inventory.push({ id: doc.id, ...doc.data() });
         });
         
+        // Aplica filtros atuais ao renderizar após mudança no banco
         filterInventory();
         updateStats();
         
+        // Se o relatório estiver visível, atualiza os gráficos automaticamente
         const reportSection = document.getElementById('relatorio');
         if (reportSection && reportSection.style.display === 'block') {
             updateReportCharts();
@@ -302,21 +306,10 @@ function filterInventory() {
     const selectedCategory = categoryFilter.value;
 
     const filtered = inventory.filter(item => {
-        if (searchTerm === '') {
-            if (selectedCategory === 'all' || selectedCategory === '') {
-                return true;
-            }
-            return item.category === selectedCategory;
-        }
-        
         const matchesSearch = item.name.toLowerCase().includes(searchTerm) || 
                               item.category.toLowerCase().includes(searchTerm);
-        
-        if (selectedCategory === 'all' || selectedCategory === '') {
-            return matchesSearch;
-        }
-        
-        return matchesSearch && item.category === selectedCategory;
+        const matchesCategory = selectedCategory === '' || item.category === selectedCategory;
+        return matchesSearch && matchesCategory;
     });
 
     renderInventory(filtered);
@@ -451,6 +444,7 @@ function setCurrentMonth() {
     const today = new Date();
     const year = today.getFullYear();
     const month = String(today.getMonth() + 1).padStart(2, '0');
+    // Só altera o valor se ele estiver vazio ou se for a primeira carga
     if (!reportMonth.value) {
         reportMonth.value = `${year}-${month}`;
     }
